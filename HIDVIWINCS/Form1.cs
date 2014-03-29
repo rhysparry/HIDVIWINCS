@@ -544,7 +544,7 @@ namespace HIDVIWINCS
                 button_Open.Invoke((Action)button_Open.PerformClick);
                 UpdateDeviceStatus();
                 _updateChannel = _updateWatcher.GetOpenSubscriberChannel();
-                _updateChannel.Subscribe("delcom.lightupdate", (m, b) => UpdateDeviceStatus());
+                _updateChannel.Subscribe(Settings.Default.UpdateChannel, (m, b) => UpdateDeviceStatus());
             });
         }
 
