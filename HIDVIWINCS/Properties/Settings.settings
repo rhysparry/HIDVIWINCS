@@ -3,7 +3,7 @@
   <Profiles />
   <Settings>
     <Setting Name="RedisHost" Type="System.String" Scope="User">
-      <Value Profile="(Default)">172.16.0.38</Value>
+      <Value Profile="(Default)">tempest.local</Value>
     </Setting>
     <Setting Name="Database" Type="System.Int32" Scope="User">
       <Value Profile="(Default)">1</Value>

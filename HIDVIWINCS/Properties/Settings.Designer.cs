@@ -25,7 +25,7 @@ namespace HIDVIWINCS.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("172.16.0.38")]
+        [global::System.Configuration.DefaultSettingValueAttribute("tempest.local")]
         public string RedisHost {
             get {
                 return ((string)(this["RedisHost"]));
