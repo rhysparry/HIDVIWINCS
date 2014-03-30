@@ -532,7 +532,7 @@ namespace HIDVIWINCS
             this.groupBox3.Size = new System.Drawing.Size(97, 146);
             this.groupBox3.TabIndex = 4;
             this.groupBox3.TabStop = false;
-            this.groupBox3.Text = "Swtich Control";
+            this.groupBox3.Text = "Switch Control";
             // 
             // button_UpdateSwitch
             // 
