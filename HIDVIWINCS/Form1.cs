@@ -14,7 +14,9 @@ namespace HIDVIWINCS
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Globalization;
+    using System.Linq.Expressions;
     using System.Threading.Tasks;
     using System.Windows.Forms;
     using HIDIOWINCS;
@@ -40,9 +42,34 @@ namespace HIDVIWINCS
         public MainForm()
         {
             InitializeComponent();
-            _redis =
-                ConnectionMultiplexer.Connect(string.Format("{0}:{1}", Settings.Default.RedisHost,
-                    Settings.Default.RedisPort), Console.Out);
+            var options = new ConfigurationOptions
+            {
+                ConnectTimeout = 5000,
+                SyncTimeout = 2000,
+                KeepAlive = 60,
+                EndPoints =
+                {
+                    {Settings.Default.RedisHost, Settings.Default.RedisPort}
+                }
+            };
+
+            _redis = ConnectionMultiplexer.Connect(options);
+            var retries = 0;
+            while (!_redis.IsConnected)
+            {
+                var config = _redis.Configuration;
+                _redis.Dispose();
+                if (retries > 10)
+                {
+                    MessageBox.Show(string.Format("Could not connect to the Redis server with configuration: {0}",
+                        config));
+                    Application.Exit();
+                }
+
+                _redis = ConnectionMultiplexer.Connect(options, Console.Out);
+                retries++;
+
+            }
             _red = new LightControlSet(button_RedOn, button_RedOff, button_RedFlash, textBox_RedOnDuty, textBox_RedOffDuty, textBox_RedOffset, textBox_RedPower, button_RedApply);
             _green = new LightControlSet(button_GreenOn, button_GreenOff, button_GreenFlash, textBox_GreenOnDuty, textBox_GreenOffDuty, textBox_GreenOffset, textBox_GreenPower, button_GreenApply);
             _blueYellow = new LightControlSet(button_BlueOn, button_BlueOff, button_BlueFlash, textBox_BlueOnDuty, textBox_BlueOffDuty, textBox_BlueOffset, textBox_BluePower, button_BlueApply);
@@ -531,37 +558,53 @@ namespace HIDVIWINCS
             {
                 button_Open.Invoke((Action)button_Open.PerformClick);
                 UpdateDeviceStatus();
-                _redis.GetSubscriber().Subscribe(Settings.Default.UpdateChannel, (m, b) => UpdateDeviceStatus());
+                try
+                {
+                    _redis.GetSubscriber().Subscribe(Settings.Default.UpdateChannel, (m, b) => UpdateDeviceStatus());
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(ex.Message);
+                    throw;
+                }
             });
         }
 
         private void UpdateDeviceStatus()
         {
-            if (_deviceStatus == null)
+            try
             {
-                _deviceStatus = ReadFormStatus();
+                if (_deviceStatus == null)
+                {
+                    _deviceStatus = ReadFormStatus();
+                }
+
+                var updatedStatus = ReadDeviceStatus();
+
+                if (_deviceStatus == updatedStatus) return;
+
+                if (updatedStatus.Red != _deviceStatus.Red)
+                {
+                    UpdateLightStatus(_red, updatedStatus.Red, _deviceStatus.Red);
+                }
+
+                if (updatedStatus.Green != _deviceStatus.Green)
+                {
+                    UpdateLightStatus(_green, updatedStatus.Green, _deviceStatus.Green);
+                }
+
+                if (updatedStatus.BlueYellow != _deviceStatus.BlueYellow)
+                {
+                    UpdateLightStatus(_blueYellow, updatedStatus.BlueYellow, _deviceStatus.BlueYellow);
+                }
+
+                _deviceStatus = updatedStatus;
             }
-
-            var updatedStatus = ReadDeviceStatus();
-
-            if (_deviceStatus == updatedStatus) return;
-
-            if (updatedStatus.Red != _deviceStatus.Red)
+            catch (Exception e)
             {
-                UpdateLightStatus(_red, updatedStatus.Red, _deviceStatus.Red);
+                Debug.WriteLine(e.Message);
+                throw;
             }
-
-            if (updatedStatus.Green != _deviceStatus.Green)
-            {
-                UpdateLightStatus(_green, updatedStatus.Green, _deviceStatus.Green);
-            }
-
-            if (updatedStatus.BlueYellow != _deviceStatus.BlueYellow)
-            {
-                UpdateLightStatus(_blueYellow, updatedStatus.BlueYellow, _deviceStatus.BlueYellow);
-            }
-
-            _deviceStatus = updatedStatus;
         }
 
         private DeviceStatus ReadFormStatus()
@@ -586,7 +629,7 @@ namespace HIDVIWINCS
             };
         }
 
-        private static void UpdateLightStatus(LightControlSet controls, LightStatus updatedStatus, LightStatus previousStatus)
+        private void UpdateLightStatus(LightControlSet controls, LightStatus updatedStatus, LightStatus previousStatus)
         {
             if (previousStatus.State != updatedStatus.State)
             {
@@ -632,7 +675,11 @@ namespace HIDVIWINCS
 
             if (change)
             {
-                controls.OffDutyValue.Invoke((Action)(controls.ApplyButton.PerformClick));
+                controls.OffDutyValue.Invoke((Action) (() =>
+                {
+                    controls.ApplyButton.PerformClick();
+                    button_Sync.PerformClick();
+                }));
             }
         }
 
