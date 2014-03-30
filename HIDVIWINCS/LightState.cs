@@ -1,6 +1,6 @@
 ﻿namespace HIDVIWINCS
 {
-    public enum LightState
+    public enum LightState : byte
     {
         Off,
         On,

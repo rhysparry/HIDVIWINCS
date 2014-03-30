@@ -10,25 +10,16 @@
 // 3 Add the above file to your project. Use add existing in Solution Explorer
 // 4 Add the following inside your namespace:
 //      DelcomHID Delcom = new DelcomHID();   // declare the Delcom class
-
-
-
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Text;
-using System.Windows.Forms;
-using HIDIOWINCS;
-
 namespace HIDVIWINCS
 {
+    using System;
+    using System.Collections.Generic;
     using System.Globalization;
     using System.Threading.Tasks;
-    using System.Windows.Forms.VisualStyles;
-    using BookSleeve;
+    using System.Windows.Forms;
+    using HIDIOWINCS;
     using Properties;
+    using StackExchange.Redis;
 
     public partial class MainForm : Form
     {
@@ -36,9 +27,7 @@ namespace HIDVIWINCS
         private DelcomHID Delcom = new DelcomHID();   // declare the Delcom class
         private DelcomHID.HidTxPacketStruct TxCmd;
 
-        private readonly RedisConnection _readSettings;
-        private readonly RedisConnection _updateWatcher;
-        private RedisSubscriberConnection _updateChannel;
+        private readonly ConnectionMultiplexer _redis;
 
         private DeviceStatus _deviceStatus;
 
@@ -51,8 +40,9 @@ namespace HIDVIWINCS
         public MainForm()
         {
             InitializeComponent();
-            _readSettings = new RedisConnection(Settings.Default.RedisHost, Settings.Default.RedisPort);
-            _updateWatcher = new RedisConnection(Settings.Default.RedisHost, Settings.Default.RedisPort);
+            _redis =
+                ConnectionMultiplexer.Connect(string.Format("{0}:{1}", Settings.Default.RedisHost,
+                    Settings.Default.RedisPort), Console.Out);
             _red = new LightControlSet(button_RedOn, button_RedOff, button_RedFlash, textBox_RedOnDuty, textBox_RedOffDuty, textBox_RedOffset, textBox_RedPower, button_RedApply);
             _green = new LightControlSet(button_GreenOn, button_GreenOff, button_GreenFlash, textBox_GreenOnDuty, textBox_GreenOffDuty, textBox_GreenOffset, textBox_GreenPower, button_GreenApply);
             _blueYellow = new LightControlSet(button_BlueOn, button_BlueOff, button_BlueFlash, textBox_BlueOnDuty, textBox_BlueOffDuty, textBox_BlueOffset, textBox_BluePower, button_BlueApply);
@@ -539,12 +529,9 @@ namespace HIDVIWINCS
         {
             Task.Delay(500).ContinueWith(t =>
             {
-                _readSettings.Open();
-                _updateWatcher.Open();
                 button_Open.Invoke((Action)button_Open.PerformClick);
                 UpdateDeviceStatus();
-                _updateChannel = _updateWatcher.GetOpenSubscriberChannel();
-                _updateChannel.Subscribe(Settings.Default.UpdateChannel, (m, b) => UpdateDeviceStatus());
+                _redis.GetSubscriber().Subscribe(Settings.Default.UpdateChannel, (m, b) => UpdateDeviceStatus());
             });
         }
 
@@ -592,10 +579,10 @@ namespace HIDVIWINCS
             return new LightStatus
             {
                 State = controls.GetState(),
-                Power = int.Parse(controls.PowerValue.Text.EmptyOrNullAs("0")),
-                OffDuty = int.Parse(controls.OffDutyValue.Text.EmptyOrNullAs("0")),
-                OnDuty = int.Parse(controls.OnDutyValue.Text.EmptyOrNullAs("0")),
-                Offset = int.Parse(controls.OffsetValue.Text.EmptyOrNullAs("0"))
+                Power = byte.Parse(controls.PowerValue.Text.EmptyOrNullAs("0")),
+                OffDuty = byte.Parse(controls.OffDutyValue.Text.EmptyOrNullAs("0")),
+                OnDuty = byte.Parse(controls.OnDutyValue.Text.EmptyOrNullAs("0")),
+                Offset = byte.Parse(controls.OffsetValue.Text.EmptyOrNullAs("0"))
             };
         }
 
@@ -661,8 +648,8 @@ namespace HIDVIWINCS
 
         private LightStatus ReadLightStatus(string color)
         {
-            var db = Settings.Default.Database;
-            var hash = _readSettings.Wait(_readSettings.Hashes.GetAll(db, color));
+            var db = _redis.GetDatabase(Settings.Default.Database);
+            var hash = db.HashGetAll(color).ToDictionary();
             if (hash.Count == 0)
             {
                 var defaultStatus = new LightStatus
@@ -680,11 +667,11 @@ namespace HIDVIWINCS
 
             var ls = new LightStatus
             {
-                State = (LightState)hash["state"][0],
-                OffDuty = hash["offduty"][0],
-                OnDuty = hash["onduty"][0],
-                Offset = hash["offset"][0],
-                Power = hash["power"][0]
+                State = (LightState)hash["state"].FirstByte(),
+                OffDuty = hash["offduty"].FirstByte(),
+                OnDuty = hash["onduty"].FirstByte(),
+                Offset = hash["offset"].FirstByte(),
+                Power = hash["power"].FirstByte()
             };
 
             return ls;
@@ -692,26 +679,20 @@ namespace HIDVIWINCS
 
         private void WriteLightStatus(string color, LightStatus ls)
         {
-            var hash = new Dictionary<string, byte[]>
+            var hash = new Dictionary<string, byte>
             {
-                {"state", new[] {(byte) ls.State}},
-                {"offduty", new[] {(byte) ls.OffDuty}},
-                {"onduty", new[] {(byte) ls.OnDuty}},
-                {"offset", new [] {(byte)ls.Offset}},
-                {"power", new[] {(byte) ls.Power}}
+                {"state", (byte)ls.State},
+                {"offduty", ls.OffDuty},
+                {"onduty", ls.OnDuty},
+                {"offset", ls.Offset},
+                {"power", ls.Power}
             };
-            _readSettings.Hashes.Set(Settings.Default.Database, color, hash);
+            _redis.GetDatabase(Settings.Default.Database).HashSet(color, hash.Entries());
         }
 
         private void MainForm_Close(object sender, FormClosedEventArgs e)
         {
-            if (_updateChannel != null)
-            {
-                _updateChannel.Dispose();
-            }
-
-            _updateWatcher.Dispose();
-            _readSettings.Dispose();
+            _redis.Dispose();
         }
     }
 }
